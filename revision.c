@@ -362,8 +362,21 @@ static struct object *get_reference(struct rev_info *revs, const char *name,
 	struct object *object = lookup_unknown_object(revs->repo, oid);
 
 	if (object->type == OBJ_NONE) {
-		int type = oid_object_info(revs->repo, oid, NULL);
-		if (type < 0 || !object_as_type(object, type, 1)) {
+		/*
+		 * It's likely that the reference points to a commit, so we
+		 * first try to look it up via the commit-graph. If successful,
+		 * then we know it's a commit and don't have to unpack the
+		 * object header. We still need to assert that the object
+		 * exists, but given that we don't request any info about the
+		 * object this is a lot faster than `oid_object_info()`.
+		 */
+		if (parse_commit_in_graph_gently(revs->repo, object) < 0) {
+			int type = oid_object_info(revs->repo, oid, NULL);
+			if (type < 0 || !object_as_type(object, type, 1)) {
+				object = NULL;
+				goto out;
+			}
+		} else if (!repo_has_object_file(revs->repo, oid)) {
 			object = NULL;
 			goto out;
 		}

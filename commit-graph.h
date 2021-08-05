@@ -41,6 +41,13 @@ int open_commit_graph(const char *graph_file, int *fd, struct stat *st);
 int parse_commit_in_graph(struct repository *r, struct commit *item);
 
 /*
+ * Given an object of unknown type, try to fill in the object in case it is a
+ * commit part of the commit-graph. Returns 0 if the object is a parsed commit
+ * or if it could be filled in via the commit graph, otherwise it returns -1.
+ */
+int parse_commit_in_graph_gently(struct repository *repo, struct object *object);
+
+/*
  * It is possible that we loaded commit contents from the commit buffer,
  * but we also want to ensure the commit-graph content is correctly
  * checked and filled. Fill the graph_pos and generation members of
