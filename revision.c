@@ -359,14 +359,22 @@ static struct object *get_reference(struct rev_info *revs, const char *name,
 				    const struct object_id *oid,
 				    unsigned int flags)
 {
-	struct object *object;
+	struct object *object = lookup_unknown_object(revs->repo, oid);
+
+	if (object->type == OBJ_NONE) {
+		int type = oid_object_info(revs->repo, oid, NULL);
+		if (type < 0 || !object_as_type(object, type, 1)) {
+			object = NULL;
+			goto out;
+		}
+	}
 
 	/*
 	 * If the repository has commit graphs, repo_parse_commit() avoids
 	 * reading the object buffer, so use it whenever possible.
 	 */
-	if (oid_object_info(revs->repo, oid, NULL) == OBJ_COMMIT) {
-		struct commit *c = lookup_commit(revs->repo, oid);
+	if (object->type == OBJ_COMMIT) {
+		struct commit *c = (struct commit *) object;
 		if (!repo_parse_commit(revs->repo, c))
 			object = (struct object *) c;
 		else
@@ -375,6 +383,7 @@ static struct object *get_reference(struct rev_info *revs, const char *name,
 		object = parse_object(revs->repo, oid);
 	}
 
+out:
 	if (!object) {
 		if (revs->ignore_missing)
 			return object;
