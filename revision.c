@@ -359,14 +359,35 @@ static struct object *get_reference(struct rev_info *revs, const char *name,
 				    const struct object_id *oid,
 				    unsigned int flags)
 {
-	struct object *object;
+	struct object *object = lookup_unknown_object(revs->repo, oid);
+
+	if (object->type == OBJ_NONE) {
+		/*
+		 * It's likely that the reference points to a commit, so we
+		 * first try to look it up via the commit-graph. If successful,
+		 * then we know it's a commit and don't have to unpack the
+		 * object header. We still need to assert that the object
+		 * exists, but given that we don't request any info about the
+		 * object this is a lot faster than `oid_object_info()`.
+		 */
+		if (parse_commit_in_graph_gently(revs->repo, object) < 0) {
+			int type = oid_object_info(revs->repo, oid, NULL);
+			if (type < 0 || !object_as_type(object, type, 1)) {
+				object = NULL;
+				goto out;
+			}
+		} else if (!repo_has_object_file(revs->repo, oid)) {
+			object = NULL;
+			goto out;
+		}
+	}
 
 	/*
 	 * If the repository has commit graphs, repo_parse_commit() avoids
 	 * reading the object buffer, so use it whenever possible.
 	 */
-	if (oid_object_info(revs->repo, oid, NULL) == OBJ_COMMIT) {
-		struct commit *c = lookup_commit(revs->repo, oid);
+	if (object->type == OBJ_COMMIT) {
+		struct commit *c = (struct commit *) object;
 		if (!repo_parse_commit(revs->repo, c))
 			object = (struct object *) c;
 		else
@@ -375,6 +396,7 @@ static struct object *get_reference(struct rev_info *revs, const char *name,
 		object = parse_object(revs->repo, oid);
 	}
 
+out:
 	if (!object) {
 		if (revs->ignore_missing)
 			return object;
@@ -1534,7 +1556,7 @@ static int handle_one_ref(const char *path, const struct object_id *oid,
 
 	object = get_reference(cb->all_revs, path, oid, cb->all_flags);
 	add_rev_cmdline(cb->all_revs, object, path, REV_CMD_REF, cb->all_flags);
-	add_pending_oid(cb->all_revs, path, oid, cb->all_flags);
+	add_pending_object(cb->all_revs, object, path);
 	return 0;
 }
 
@@ -2256,6 +2278,10 @@ static int handle_revision_opt(struct rev_info *revs, int argc, const char **arg
 	} else if (!strcmp(arg, "--author-date-order")) {
 		revs->sort_order = REV_SORT_BY_AUTHOR_DATE;
 		revs->topo_order = 1;
+	} else if (!strcmp(arg, "--unsorted-input")) {
+		if (revs->no_walk && !revs->unsorted_input)
+			die(_("--unsorted-input is incompatible with --no-walk and --no-walk=sorted"));
+		revs->unsorted_input = 1;
 	} else if (!strcmp(arg, "--early-output")) {
 		revs->early_output = 100;
 		revs->topo_order = 1;
@@ -2651,16 +2677,22 @@ static int handle_revision_pseudo_opt(const char *submodule,
 	} else if (!strcmp(arg, "--not")) {
 		*flags ^= UNINTERESTING | BOTTOM;
 	} else if (!strcmp(arg, "--no-walk")) {
-		revs->no_walk = REVISION_WALK_NO_WALK_SORTED;
+		if (revs->unsorted_input)
+			die(_("--no-walk is incompatible with --no-walk=unsorted and --unsorted-input"));
+		revs->no_walk = 1;
 	} else if (skip_prefix(arg, "--no-walk=", &optarg)) {
 		/*
 		 * Detached form ("--no-walk X" as opposed to "--no-walk=X")
 		 * not allowed, since the argument is optional.
 		 */
-		if (!strcmp(optarg, "sorted"))
-			revs->no_walk = REVISION_WALK_NO_WALK_SORTED;
-		else if (!strcmp(optarg, "unsorted"))
-			revs->no_walk = REVISION_WALK_NO_WALK_UNSORTED;
+		revs->no_walk = 1;
+		if (!strcmp(optarg, "sorted")) {
+			if (revs->unsorted_input)
+				die(_("--no-walk=sorted is incompatible with --no-walk=unsorted "
+				    "and --unsorted-input"));
+			revs->unsorted_input = 0;
+		} else if (!strcmp(optarg, "unsorted"))
+			revs->unsorted_input = 1;
 		else
 			return error("invalid argument to --no-walk");
 	} else if (!strcmp(arg, "--do-walk")) {
@@ -3584,7 +3616,7 @@ int prepare_revision_walk(struct rev_info *revs)
 
 	if (!revs->reflog_info)
 		prepare_to_use_bloom_filter(revs);
-	if (revs->no_walk != REVISION_WALK_NO_WALK_UNSORTED)
+	if (!revs->unsorted_input)
 		commit_list_sort_by_date(&revs->commits);
 	if (revs->no_walk)
 		return 0;
