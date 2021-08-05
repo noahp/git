@@ -169,4 +169,42 @@ test_expect_success 'rev-list --count --objects' '
 	test_line_count = $count actual
 '
 
+test_expect_success 'rev-list --unsorted-input results in different sorting' '
+	git rev-list --unsorted-input HEAD HEAD~ >first &&
+	git rev-list --unsorted-input HEAD~ HEAD >second &&
+	! test_cmp first second &&
+	sort first >first.sorted &&
+	sort second >second.sorted &&
+	test_cmp first.sorted second.sorted
+'
+
+test_expect_success 'rev-list --unsorted-input compatible with --no-walk=unsorted' '
+	git rev-list --unsorted-input --no-walk=unsorted HEAD HEAD~ >actual &&
+	git rev-parse HEAD >expect &&
+	git rev-parse HEAD~ >>expect &&
+	test_cmp expect actual
+'
+
+test_expect_success 'rev-list --unsorted-input incompatible with --no-walk=sorted' '
+	cat >expect <<-EOF &&
+		fatal: --no-walk is incompatible with --no-walk=unsorted and --unsorted-input
+	EOF
+	test_must_fail git rev-list --unsorted-input --no-walk HEAD 2>error &&
+	test_cmp expect error &&
+
+	cat >expect <<-EOF &&
+		fatal: --no-walk=sorted is incompatible with --no-walk=unsorted and --unsorted-input
+	EOF
+	test_must_fail git rev-list --unsorted-input --no-walk=sorted HEAD 2>error &&
+	test_cmp expect error &&
+
+	cat >expect <<-EOF &&
+		fatal: --unsorted-input is incompatible with --no-walk and --no-walk=sorted
+	EOF
+	test_must_fail git rev-list --no-walk --unsorted-input HEAD 2>error &&
+	test_cmp expect error &&
+	test_must_fail git rev-list --no-walk=sorted --unsorted-input HEAD 2>error &&
+	test_cmp expect error
+'
+
 test_done

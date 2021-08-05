@@ -2256,6 +2256,10 @@ static int handle_revision_opt(struct rev_info *revs, int argc, const char **arg
 	} else if (!strcmp(arg, "--author-date-order")) {
 		revs->sort_order = REV_SORT_BY_AUTHOR_DATE;
 		revs->topo_order = 1;
+	} else if (!strcmp(arg, "--unsorted-input")) {
+		if (revs->no_walk && !revs->unsorted_input)
+			die(_("--unsorted-input is incompatible with --no-walk and --no-walk=sorted"));
+		revs->unsorted_input = 1;
 	} else if (!strcmp(arg, "--early-output")) {
 		revs->early_output = 100;
 		revs->topo_order = 1;
@@ -2651,6 +2655,8 @@ static int handle_revision_pseudo_opt(const char *submodule,
 	} else if (!strcmp(arg, "--not")) {
 		*flags ^= UNINTERESTING | BOTTOM;
 	} else if (!strcmp(arg, "--no-walk")) {
+		if (revs->unsorted_input)
+			die(_("--no-walk is incompatible with --no-walk=unsorted and --unsorted-input"));
 		revs->no_walk = 1;
 	} else if (skip_prefix(arg, "--no-walk=", &optarg)) {
 		/*
@@ -2658,9 +2664,12 @@ static int handle_revision_pseudo_opt(const char *submodule,
 		 * not allowed, since the argument is optional.
 		 */
 		revs->no_walk = 1;
-		if (!strcmp(optarg, "sorted"))
+		if (!strcmp(optarg, "sorted")) {
+			if (revs->unsorted_input)
+				die(_("--no-walk=sorted is incompatible with --no-walk=unsorted "
+				    "and --unsorted-input"));
 			revs->unsorted_input = 0;
-		else if (!strcmp(optarg, "unsorted"))
+		} else if (!strcmp(optarg, "unsorted"))
 			revs->unsorted_input = 1;
 		else
 			return error("invalid argument to --no-walk");
